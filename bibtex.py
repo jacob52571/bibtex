@@ -16,6 +16,7 @@ def handle_arxiv_links(paper_id):
         return [False, "https://arxiv.org/pdf/" + paper_id]
 
 def handle_iacr_links(link, file_name):
+    # gets rid of a / if there's one at the end of the url
     if link[-1] == "/":
         link = link[:-1]
     try:
@@ -33,9 +34,11 @@ def handle_iacr_links(link, file_name):
         # delete file
         os.remove(file_name)
     except:
+        # if it doesnt work then return pdf link
         return [False, link + ".pdf"]
 
 def generate_article_bibtex(title, author, journal, volume, number, pages, year, publisher):
+    # take all the data and generate a citation
     key = author.split(",")[0] + number
     cite = f"""@article{{{key},
   title={{{title}}},
@@ -47,7 +50,6 @@ def generate_article_bibtex(title, author, journal, volume, number, pages, year,
   year={{{year}}},
   publisher={{{publisher}}},
 }}"""
-    print(cite)
     return cite
 
 if __name__ == "__main__":
@@ -67,6 +69,7 @@ if __name__ == "__main__":
 
         # get links from the text in the file
         with open(current_path + "/word_file/word/_rels/document.xml.rels", "r") as file:
+            # parse the xml file that has all the hyperlinks
             tree = ET.parse(file)
             relationships = tree.getroot()
             for relationship in relationships:
@@ -101,6 +104,7 @@ if __name__ == "__main__":
                         else:
                             links.append(link[1])
                             print("iacr paper", file_name, "found, awaiting citation")
+                    # for general pdfs, add them to the list and cite them the normal way
                     else:
                         links.append(link)
                         print("paper from", link, "found, awaiting citation")
@@ -130,6 +134,7 @@ if __name__ == "__main__":
             
             print("All pdfs downloaded, starting processing now...")
 
+            # reads all pdfs and extracts the data
             for dirpath, dirnames, filenames in os.walk(pdf_paths):
                 for file in filenames:
                     print("trying to read", pdf_paths + file)
@@ -140,6 +145,7 @@ if __name__ == "__main__":
                     with open("out.txt", "w") as f:
                         f.write(text)
 
+        # write the cites to the output file
         with open("output.bib", "w") as f:
             for line in citations:
                 f.write(line + "\n")
@@ -154,7 +160,7 @@ if __name__ == "__main__":
             os.rename(link_file + ".zip", link_file)
             # remove the folder
             shutil.rmtree(current_path + "/word_file/")
-            #shutil.rmtree(current_path + "/pdfs/")
+            shutil.rmtree(current_path + "/pdfs/")
         except:
             pass
         finally:
