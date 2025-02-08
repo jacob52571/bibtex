@@ -10,6 +10,9 @@ def handle_arxiv_links(paper_id):
     # if the links are from arxiv, check if they have a bibtex citation available already
     try:
         file_contents = urllib.request.urlopen("https://arxiv.org/bibtex/" + paper_id).read().decode("utf-8")
+        # add doi to the citation
+        doi = f"10.48550/arXiv.{paper_id}"
+        file_contents = file_contents.replace("}", f",\n  doi={{{doi}}}\n}}")
         return [True, file_contents]
     except:
         # if the citation doesn't work, then just return the pdf link and get citation the normal way
@@ -23,16 +26,17 @@ def handle_iacr_links(link, file_name):
         # get the citation straight from the website by getting the html
         os.system("curl " + link + " --output " + file_name + " > /dev/null 2>&1")
         # get the citation from the html
+        contents = ""
         with open(file_name, "r") as f:
             contents = f.read()
-            contents = contents.split("<pre id=\"bibtex\">")[1].split("</pre>")[0]
-            # make sure the citation is right
-            if contents.startswith("\n@"):
-                return [True, contents]
-            else:
-                return [False, link + ".pdf"]
+            contents = contents.split("<pre id=\"bibtex\">\n")[1].split("</pre>")[0]
         # delete file
         os.remove(file_name)
+        # make sure the citation is right
+        if contents.startswith("@"):
+            return [True, contents]
+        else:
+            return [False, link + ".pdf"]
     except:
         # if it doesnt work then return pdf link
         return [False, link + ".pdf"]
