@@ -6,7 +6,7 @@ import urllib.request
 import shutil
 from pypdf import PdfReader
 
-def handle_arxiv_links(paper_id, pdf_paths):
+def handle_arxiv_links(paper_id, pdf_paths, auto_keywords=False):
     # if the links are from arxiv, check if they have a bibtex citation available already
     try:
         file_contents = urllib.request.urlopen("https://arxiv.org/bibtex/" + paper_id).read().decode("utf-8")
@@ -18,23 +18,24 @@ def handle_arxiv_links(paper_id, pdf_paths):
             reader = PdfReader(pdf_paths + paper_id + ".pdf")
             # get page count
             page_count = len(reader.pages)
-            # read the first page and see if there are any keywords
             keywords = ""
-            page = reader.pages[0]
-            text = page.extract_text()
-            # format the pdf
-            text = " ".join(text.split("\n"))
-            if "index terms" in text.lower():
-                loc_of_terms = text.lower().find("index terms") + 11
-                end_of_terms = text.lower().find(". i.")
-                citation_start = lambda s: next((i for i, c in enumerate(s) if c.isalpha()), None)
-                keywords = text[loc_of_terms:end_of_terms][citation_start(text[loc_of_terms:end_of_terms]):].replace("- ", "").replace(", ", ";")
+            if auto_keywords:
+                # read the first page and see if there are any keywords
+                page = reader.pages[0]
+                text = page.extract_text()
+                # format the pdf
+                text = " ".join(text.split("\n"))
+                if "index terms" in text.lower():
+                    loc_of_terms = text.lower().find("index terms") + 11
+                    end_of_terms = text.lower().find(". i.")
+                    citation_start = lambda s: next((i for i, c in enumerate(s) if c.isalpha()), None)
+                    keywords = text[loc_of_terms:end_of_terms][citation_start(text[loc_of_terms:end_of_terms]):].replace("- ", "").replace(", ", ";")
         except Exception as e:
             file_contents = file_contents.replace("}, \n}", f"}},\n      doi={{{doi}}},\n}}")
             return [True, file_contents]
         else:
             os.remove(pdf_paths + paper_id + ".pdf")
-            file_contents = file_contents.replace("}, \n}", f"}},\n      doi={{{doi}}},\n      pages={{1-{page_count}}},\n      keywords={{{keywords}}}\n}}")
+            file_contents = file_contents.replace("}, \n}", f"}},\n      doi={{{doi}}},\n      pages={{1-{page_count}}}{f",\n      keywords={{{keywords}}}" if len(keywords) > 0 else ""}\n}}")
             return [True, file_contents]
     except:
         # if the citation doesn't work, then just return the pdf link and get citation the normal way
@@ -65,6 +66,7 @@ def handle_iacr_links(link, file_name):
 
 if __name__ == "__main__":
     current_path = os.path.abspath(os.path.dirname(__file__))
+    auto_cite_arxiv = None
 
     # get the word file
     link_file = current_path + "/" + input("Enter the name/path of the word document: ")
@@ -75,7 +77,6 @@ if __name__ == "__main__":
         # format the file 
         os.rename(link_file, link_file + ".zip")
         with zipfile.ZipFile(link_file + ".zip", 'r') as zip_ref:
-            print("extracting to " + current_path + "/word_file/")
             zip_ref.extractall(current_path + "/word_file/")
 
         # make the folder for the pdfs
@@ -93,9 +94,11 @@ if __name__ == "__main__":
                     link = relationship.attrib["Target"]
                     # if the link is arxiv, get the bibtex automatically if possible, otherwise add the pdf link
                     if "arxiv" in link:
+                        if auto_cite_arxiv == None:
+                            auto_cite_arxiv = input("Do you want to automatically get keywords for arxiv papers? (y/n): ").lower() == "y"
                         link_data = link.split("/")
                         paper_id = link_data[-2] if link_data[-1] == "" else link_data[-1]
-                        link = handle_arxiv_links(paper_id, pdf_paths)
+                        link = handle_arxiv_links(paper_id, pdf_paths, auto_keywords=auto_cite_arxiv)
                         if link[0]:
                             citations.append(link[1])
                             print("arxiv paper", paper_id, "found and cited")
