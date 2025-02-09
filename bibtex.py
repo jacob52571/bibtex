@@ -6,11 +6,37 @@ import urllib.request
 import shutil
 from pypdf import PdfReader
 
-def handle_arxiv_links(paper_id):
+def handle_arxiv_links(paper_id, pdf_paths, auto_keywords=False):
     # if the links are from arxiv, check if they have a bibtex citation available already
     try:
         file_contents = urllib.request.urlopen("https://arxiv.org/bibtex/" + paper_id).read().decode("utf-8")
-        return [True, file_contents]
+        # add doi to the citation
+        doi = f"10.48550/arXiv.{paper_id}"
+        try:
+            # get page count and try to get keywords
+            os.system("curl https://arxiv.org/pdf/" + paper_id + " --output " + pdf_paths + paper_id + ".pdf > /dev/null 2>&1")
+            reader = PdfReader(pdf_paths + paper_id + ".pdf")
+            # get page count
+            page_count = len(reader.pages)
+            keywords = ""
+            if auto_keywords:
+                # read the first page and see if there are any keywords
+                page = reader.pages[0]
+                text = page.extract_text()
+                # format the pdf
+                text = " ".join(text.split("\n"))
+                if "index terms" in text.lower():
+                    loc_of_terms = text.lower().find("index terms") + 11
+                    end_of_terms = text.lower().find(". i.")
+                    citation_start = lambda s: next((i for i, c in enumerate(s) if c.isalpha()), None)
+                    keywords = text[loc_of_terms:end_of_terms][citation_start(text[loc_of_terms:end_of_terms]):].replace("- ", "").replace(", ", ";")
+        except Exception as e:
+            file_contents = file_contents.replace("}, \n}", f"}},\n      doi={{{doi}}},\n}}")
+            return [True, file_contents]
+        else:
+            os.remove(pdf_paths + paper_id + ".pdf")
+            file_contents = file_contents.replace("}, \n}", f"}},\n      doi={{{doi}}},\n      pages={{1-{page_count}}}{f",\n      keywords={{{keywords}}}" if len(keywords) > 0 else ""}\n}}")
+            return [True, file_contents]
     except:
         # if the citation doesn't work, then just return the pdf link and get citation the normal way
         return [False, "https://arxiv.org/pdf/" + paper_id]
@@ -23,37 +49,24 @@ def handle_iacr_links(link, file_name):
         # get the citation straight from the website by getting the html
         os.system("curl " + link + " --output " + file_name + " > /dev/null 2>&1")
         # get the citation from the html
+        contents = ""
         with open(file_name, "r") as f:
             contents = f.read()
-            contents = contents.split("<pre id=\"bibtex\">")[1].split("</pre>")[0]
-            # make sure the citation is right
-            if contents.startswith("\n@"):
-                return [True, contents]
-            else:
-                return [False, link + ".pdf"]
+            contents = contents.split("<pre id=\"bibtex\">\n")[1].split("</pre>")[0]
         # delete file
         os.remove(file_name)
+        # make sure the citation is right
+        if contents.startswith("@"):
+            return [True, contents]
+        else:
+            return [False, link + ".pdf"]
     except:
         # if it doesnt work then return pdf link
         return [False, link + ".pdf"]
 
-def generate_article_bibtex(title, author, journal, volume, number, pages, year, publisher):
-    # take all the data and generate a citation
-    key = author.split(",")[0] + number
-    cite = f"""@article{{{key},
-  title={{{title}}},
-  author={{{author}}},
-  journal={{{journal}}},
-  volume={{{volume}}},
-  number={{{number}}},
-  pages={{{pages}}},
-  year={{{year}}},
-  publisher={{{publisher}}},
-}}"""
-    return cite
-
 if __name__ == "__main__":
     current_path = os.path.abspath(os.path.dirname(__file__))
+    auto_cite_arxiv = None
 
     # get the word file
     link_file = current_path + "/" + input("Enter the name/path of the word document: ")
@@ -64,9 +77,13 @@ if __name__ == "__main__":
         # format the file 
         os.rename(link_file, link_file + ".zip")
         with zipfile.ZipFile(link_file + ".zip", 'r') as zip_ref:
-            print("extracting to " + current_path + "/word_file/")
             zip_ref.extractall(current_path + "/word_file/")
 
+        # make the folder for the pdfs
+        pdf_paths = current_path + "/pdfs/"
+        if not os.path.exists(pdf_paths):
+            os.makedirs(pdf_paths)
+        
         # get links from the text in the file
         with open(current_path + "/word_file/word/_rels/document.xml.rels", "r") as file:
             # parse the xml file that has all the hyperlinks
@@ -77,9 +94,11 @@ if __name__ == "__main__":
                     link = relationship.attrib["Target"]
                     # if the link is arxiv, get the bibtex automatically if possible, otherwise add the pdf link
                     if "arxiv" in link:
+                        if auto_cite_arxiv == None:
+                            auto_cite_arxiv = input("Do you want to automatically get keywords for arxiv papers? (y/n): ").lower() == "y"
                         link_data = link.split("/")
                         paper_id = link_data[-2] if link_data[-1] == "" else link_data[-1]
-                        link = handle_arxiv_links(paper_id)
+                        link = handle_arxiv_links(paper_id, pdf_paths, auto_keywords=auto_cite_arxiv)
                         if link[0]:
                             citations.append(link[1])
                             print("arxiv paper", paper_id, "found and cited")
@@ -113,11 +132,6 @@ if __name__ == "__main__":
         print(len(citations) + len(links), "total papers found.")
         print(len(citations), "already cited,", len(links), "to download")
         if len(links) > 0:
-            # make the folder for the pdfs
-            pdf_paths = current_path + "/pdfs/"
-            if not os.path.exists(pdf_paths):
-                os.makedirs(pdf_paths)
-
             # get the files from the links
             for i in range(0, len(links)):
                 link = links[i]
