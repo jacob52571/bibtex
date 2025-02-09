@@ -5,6 +5,7 @@ import sys
 import urllib.request
 import shutil
 from pypdf import PdfReader
+import re
 
 def handle_arxiv_links(paper_id, pdf_paths, auto_keywords=False):
     # if the links are from arxiv, check if they have a bibtex citation available already
@@ -25,15 +26,32 @@ def handle_arxiv_links(paper_id, pdf_paths, auto_keywords=False):
                 text = page.extract_text()
                 # format the pdf
                 text = " ".join(text.split("\n"))
-                if "index terms" in text.lower():
+                # check if there are keywords
+                if "keywords" in text.lower():
+                    # find the start and end of the keywords
+                    loc_of_terms = text.lower().find("keywords") + 8
+                    end_of_terms = min(text.lower().find("introduction"), text.lower()[loc_of_terms:].find("1") + loc_of_terms, key=lambda v: v if v > 0 else float('inf'))
+                    # gather all the keywords by finding the first letter (since the string may start with ": ")
+                    citation_start = lambda s: next((i for i, c in enumerate(s) if c.isalpha()), None)
+                    # match regex to find where the keywords are split
+                    keywords_list = re.split(r'[^\w\s]+', text[loc_of_terms:end_of_terms])
+                    # join them into a string
+                    keywords = ";".join([x.strip() for x in keywords_list if len(x) > 2])
+                elif "index terms" in text.lower():
+                    # the start and end of the keywords
                     loc_of_terms = text.lower().find("index terms") + 11
                     end_of_terms = text.lower().find(". i.")
+                    # find the first letter
                     citation_start = lambda s: next((i for i, c in enumerate(s) if c.isalpha()), None)
+                    # get the keywords and format them
                     keywords = text[loc_of_terms:end_of_terms][citation_start(text[loc_of_terms:end_of_terms]):].replace("- ", "").replace(", ", ";")
         except Exception as e:
+            # if there's an error, just add the doi
+            print(f'Error: {e}')
             file_contents = file_contents.replace("}, \n}", f"}},\n      doi={{{doi}}},\n}}")
             return [True, file_contents]
         else:
+            # if everything works, then delete the pdf and add the page count and keywords
             os.remove(pdf_paths + paper_id + ".pdf")
             file_contents = file_contents.replace("}, \n}", f"}},\n      doi={{{doi}}},\n      pages={{1-{page_count}}}{f",\n      keywords={{{keywords}}}" if len(keywords) > 0 else ""}\n}}")
             return [True, file_contents]
@@ -50,17 +68,24 @@ def handle_iacr_links(link, file_name):
         os.system("curl " + link + " --output " + file_name + " > /dev/null 2>&1")
         # get the citation from the html
         contents = ""
+        keywords = ""
         with open(file_name, "r") as f:
-            contents = f.read()
-            contents = contents.split("<pre id=\"bibtex\">\n")[1].split("</pre>")[0]
+            page_data = f.read()
+            contents = page_data.split("<pre id=\"bibtex\">\n")[1].split("</pre>")[0]
+            # get the keywords
+            keywords_list = page_data.split(" class=\"me-2 badge bg-secondary keyword\">")[1:]
+
+            if keywords_list:
+                keywords = ";".join([kw.split("</a>")[0] for kw in keywords_list])
         # delete file
         os.remove(file_name)
         # make sure the citation is right
         if contents.startswith("@"):
-            return [True, contents]
+            return [True, contents.replace("}\n}", f"}},{f",\n      keywords={{{keywords}}}" if len(keywords) > 0 else ""}\n}}")]
         else:
             return [False, link + ".pdf"]
-    except:
+    except Exception as e:
+        print(f'Error: {e}')
         # if it doesnt work then return pdf link
         return [False, link + ".pdf"]
 
@@ -132,6 +157,11 @@ if __name__ == "__main__":
         print(len(citations) + len(links), "total papers found.")
         print(len(citations), "already cited,", len(links), "to download")
         if len(links) > 0:
+            print("The following papers will need manual citation:")
+            for link in links:
+                print(link)
+            # this code doesn't work yet, but it's supposed to download the pdfs and extract the data
+            #"""
             # get the files from the links
             for i in range(0, len(links)):
                 link = links[i]
@@ -147,7 +177,7 @@ if __name__ == "__main__":
                     os.system("curl " + link + " --output " + pdf_paths + str(i) + ".pdf")
             
             print("All pdfs downloaded, starting processing now...")
-
+            
             # reads all pdfs and extracts the data
             for dirpath, dirnames, filenames in os.walk(pdf_paths):
                 for file in filenames:
@@ -158,6 +188,7 @@ if __name__ == "__main__":
                     text = page.extract_text()
                     with open("out.txt", "w") as f:
                         f.write(text)
+            #"""
 
         # write the cites to the output file
         with open("output.bib", "w") as f:
